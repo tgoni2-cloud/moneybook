@@ -64,6 +64,7 @@ const DEFAULT_SETTINGS = {
   ],
   rules: { salary: '한국쌔스소프트', reimb: 'SAS Softwa', wife: '김보민', wifeName: '아내' },
   gmail: { clientId: '', query: 'banksalad has:attachment' },
+  fixed: { overrides: {}, manual: [] },
 };
 let DEK = null, META = null;
 let DATA = null; // {txs, assets, settings, importedAt, fileName, assetHistory}
@@ -136,6 +137,7 @@ async function loadData() {
   DATA.settings = Object.assign(structuredClone(DEFAULT_SETTINGS), DATA.settings || {});
   DATA.settings.rules = Object.assign(structuredClone(DEFAULT_SETTINGS.rules), DATA.settings.rules || {});
   DATA.settings.gmail = Object.assign(structuredClone(DEFAULT_SETTINGS.gmail), DATA.settings.gmail || {});
+  DATA.settings.fixed = Object.assign(structuredClone(DEFAULT_SETTINGS.fixed), DATA.settings.fixed || {});
   reclassify();
   // Default views to latest data if today has nothing yet
   if (DATA.txs.length) { const last = DATA.txs[0].d; if (last < UI.month + '-01') { UI.month = last.slice(0, 7); UI.year = last.slice(0, 4); } }
@@ -378,17 +380,22 @@ const ICONS = {
   month: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M8 3v4M16 3v4M3.5 10h17M8 14h2M14 14h2M8 17h2M14 17h2"/></svg>',
   year: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 20V11M10 20V6M15 20v-7M20 20V4"/></svg>',
   asset: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3 3.5 8v1.5h17V8L12 3Z"/><path d="M5.5 10v7M10 10v7M14 10v7M18.5 10v7M3.5 20h17" stroke-linecap="round"/></svg>',
+  fixed: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 8.5"/><path d="M20 4v4.5h-4.5"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15.5"/><path d="M4 20v-4.5h4.5"/><path d="M12 8.5v7M14 10h-2.8a1.2 1.2 0 0 0 0 2.4h1.6a1.2 1.2 0 0 1 0 2.4H10"/></svg>',
   setting: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>',
 };
-const TABS = [['setting', 'Setting'], ['asset', 'Asset'], ['today', 'Today'], ['month', 'Month'], ['year', 'Year']];
+const TABS = [['asset', 'Asset'], ['fixed', '고정비'], ['today', 'Today'], ['month', 'Month'], ['year', 'Year']];
 function renderTabs() {
   $('#tabs').innerHTML = TABS.map(([k, l]) => `<button data-tab="${k}" class="${UI.tab === k ? 'on' : ''} ${k === 'today' ? 'center' : ''}">${k === 'today' ? `<span class="pill">${ICONS[k]}</span>` : ICONS[k]}<span>${l}</span></button>`).join('');
 }
 $('#tabs')?.addEventListener('click', () => {});
 function render() {
   renderTabs();
-  const v = { today: vToday, month: vMonth, year: vYear, asset: vAsset, setting: vSetting }[UI.tab];
+  const v = { today: vToday, month: vMonth, year: vYear, asset: vAsset, fixed: vFixed, setting: vSetting }[UI.tab];
   $('#app').innerHTML = v();
+  // 설정은 탭 대신 각 화면 오른쪽 위 톱니바퀴로 이동
+  const tb = $('#app .topbar');
+  if (tb && UI.tab !== 'setting') tb.insertAdjacentHTML('beforeend', `<button class="gear" data-tab="setting" aria-label="설정">${ICONS.setting}</button>`);
+  if (tb && UI.tab === 'setting') tb.insertAdjacentHTML('afterbegin', `<button class="gear" data-tab="${UI.prevTab || 'today'}" aria-label="뒤로">‹</button>`);
   window.scrollTo(0, 0);
 }
 
@@ -582,6 +589,133 @@ function payOptions(cur) {
   return '<option value="">선택하세요</option>' + pays.map(p => `<option ${p === cur ? 'selected' : ''}>${esc(p)}</option>`).join('');
 }
 
+// ---------- 고정비 (매달 반복 결제·할부 자동 감지 + 사용자 수정) ----------
+const FIX_TYPES = ['구독', '통신', '주거', '보험', '렌탈', '할부', '대출', '기타'];
+const FIX_ICON = { 구독: '🔁', 통신: '📱', 주거: '🏠', 보험: '🛡️', 렌탈: '💧', 할부: '🧾', 대출: '🏦', 기타: '📌' };
+const normMemo = m => String(m || '').replace(/[0-9]+/g, '').replace(/\s+/g, ' ').trim();
+const FIX_KW = /관리비|자동납부|자동이체|보험|텔레콤|통신|가스|전기|수도|렌탈|코웨이|생명|손해|DB손|삼성생|SKT|KT|U\+|이자/;
+function guessType(memo, amt, cat) {
+  const a = String(Math.abs(Math.round(amt)));
+  if (/(\d)\1{3,}$/.test(a) && Math.abs(amt) >= 100000) return '할부';
+  if (/보험|생명|손해|DB손|삼성생/.test(memo)) return '보험';
+  if (/텔레콤|SKT|KT|U\+|통신|피에스앤마케팅/.test(memo)) return '통신';
+  if (/관리비|가스|전기|수도|에너지/.test(memo) || cat === '주거/통신') return '주거';
+  if (/코웨이|렌탈/.test(memo)) return '렌탈';
+  if (/이자|대출/.test(memo)) return '대출';
+  if (/SUBSCR|Netflix|멤버십|Apple|플러스|구독|YouTube|Google|와우|시리즈|CLAUDE|OPENAI/i.test(memo)) return '구독';
+  // 같은 금액이 매달 반복되는 10만원 이상 결제는 대부분 카드 할부
+  if (Math.abs(amt) >= 100000 && cat !== '주거/통신') return '할부';
+  return '기타';
+}
+const ymAdd = (ym, n) => { const [y, m] = ym.split('-').map(Number); const d = new Date(y, m - 1 + n, 1); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; };
+const median = a => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : 0; };
+function detectFixed() {
+  if (!DATA.txs.length) return [];
+  const end = DATA.txs[0].d.slice(0, 7), from = ymAdd(end, -11);
+  const pool = DATA.txs.filter(t => t.amt < 0 && t.d.slice(0, 7) >= from && (isExp(t) || (t.k === 'fin' && FIX_KW.test(t.memo))) && Math.abs(t.amt) < 5e6);
+  const out = [], used = new Set();
+  const build = (key, ts, variable) => {
+    const months = [...new Set(ts.map(t => t.d.slice(0, 7)))].sort();
+    const last = ts.reduce((a, b) => (a.d + a.t > b.d + b.t ? a : b));
+    const perMonth = months.map(m => -ts.filter(t => t.d.startsWith(m)).reduce((s, t) => s + t.amt, 0));
+    const amount = variable ? perMonth[perMonth.length - 1] : -last.amt;
+    return { key, name: last.memo, pay: last.pay, cat: last.cat, amount, day: Math.round(median(ts.map(t => +t.d.slice(8)))),
+      months, lastMonth: months[months.length - 1], variable, type: guessType(last.memo, amount, last.cat), auto: true, txKeys: ts };
+  };
+  // A: 같은 가맹점·같은 금액이 3개월 이상 (구독, 할부, 정액 이체)
+  const ga = {}, freq = {};
+  for (const t of pool) {
+    (ga[normMemo(t.memo) + '|' + t.pay + '|' + Math.round(t.amt)] ||= []).push(t);
+    const f = (freq[normMemo(t.memo) + '|' + t.pay] ||= { n: 0, m: new Set() }); f.n++; f.m.add(t.d.slice(0, 7));
+  }
+  for (const [k, ts] of Object.entries(ga)) {
+    const months = new Set(ts.map(t => t.d.slice(0, 7)));
+    if (months.size < 3 || ts.length / months.size > 1.2) continue;
+    // 편의점·배달처럼 자주 가는 곳에서 우연히 같은 금액이 반복된 경우는 제외
+    const f = freq[normMemo(ts[0].memo) + '|' + ts[0].pay];
+    if (f.n / f.m.size > 2 && guessType(ts[0].memo, ts[0].amt, ts[0].cat) === '기타') continue;
+    out.push(build('A|' + k, ts, false)); ts.forEach(t => used.add(t));
+  }
+  // B: 금액이 달라지는 공과금·통신·보험·관리비
+  const gb = {};
+  for (const t of pool) if (!used.has(t) && FIX_KW.test(t.memo)) (gb[normMemo(t.memo) + '|' + t.pay] ||= []).push(t);
+  for (const [k, ts] of Object.entries(gb)) {
+    const months = new Set(ts.map(t => t.d.slice(0, 7)));
+    if (months.size >= 3 && ts.length / months.size <= 2.2) out.push(build('B|' + k, ts, true));
+  }
+  return out;
+}
+function fixedItems() {
+  const F = DATA.settings.fixed, end = DATA.txs[0]?.d.slice(0, 7) || today.slice(0, 7), cur = today.slice(0, 7);
+  const items = detectFixed().map(it => Object.assign(it, F.overrides[it.key] || {}));
+  for (const m of F.manual) items.push({ ...m, auto: false, months: [], lastMonth: '', txKeys: [] });
+  for (const it of items) {
+    it.active = !it.auto || it.lastMonth >= ymAdd(end, -1);
+    const paidTx = it.txKeys.filter(t => t.d.startsWith(cur));
+    it.paidThisMonth = paidTx.length ? paidTx[0].d : null;
+    if (it.type === '할부') {
+      const startYm = it.start || it.months[0] || cur;
+      it.paidCount = it.auto ? it.months.length : Math.max(0, monthsBetween(startYm, cur) + 1);
+      if (it.total) { it.remain = Math.max(0, it.total - it.paidCount); it.endYm = ymAdd(startYm, it.total - 1); if (it.remain === 0 && it.paidCount >= it.total && !it.paidThisMonth) it.active = false; }
+    }
+  }
+  return items.filter(it => !it.hidden).sort((a, b) => a.day - b.day || b.amount - a.amount);
+}
+const monthsBetween = (a, b) => { const [y1, m1] = a.split('-').map(Number), [y2, m2] = b.split('-').map(Number); return (y2 - y1) * 12 + (m2 - m1); };
+function fixedRow(it) {
+  const sub = [it.pay, it.type, it.variable ? '금액 변동' : null].filter(Boolean).join(' · ');
+  let status = '';
+  if (it.type === '할부') status = it.total ? `${Math.min(it.paidCount, it.total)}/${it.total}회 · ${it.remain ? `남은 ${it.remain}회 ${man(it.remain * it.amount)}원 · ${it.endYm} 끝` : '완납'}` : `${it.paidCount}회째 결제 · 총 회차를 입력하면 남은 금액이 보여요`;
+  const badge = it.active ? (it.paidThisMonth ? `<span class="inc" style="font-size:12px">✓ ${+it.paidThisMonth.slice(8)}일 결제</span>` : `<span class="muted" style="font-size:12px">${it.day}일 예정</span>`) : '<span class="muted" style="font-size:12px">최근 결제 없음</span>';
+  return `<button class="tx fx" data-fixed="${esc(it.key)}" style="width:100%;text-align:left"><div class="ic daybadge"><b>${it.day}</b><small>일</small></div>
+    <div class="mid"><div class="t1">${FIX_ICON[it.type] || ''} ${esc(it.name)}</div><div class="t2">${esc(sub)}</div>${status ? `<div class="t2" style="color:var(--accent)">${esc(status)}</div>` : ''}</div>
+    <div style="text-align:right"><div class="amt num">${won(it.amount)}</div>${badge}</div></button>`;
+}
+function vFixed() {
+  if (!DATA.txs.length && !DATA.settings.fixed.manual.length) return `<div class="topbar"><h2>고정비</h2></div>` + noData();
+  const items = fixedItems(), act = items.filter(i => i.active), old = items.filter(i => !i.active);
+  const total = act.reduce((s, i) => s + i.amount, 0), paid = act.filter(i => i.paidThisMonth).reduce((s, i) => s + i.amount, 0);
+  const byType = {}; for (const i of act) byType[i.type] = (byType[i.type] || 0) + i.amount;
+  const inst = act.filter(i => i.type === '할부');
+  return `<div class="topbar"><h2>고정비</h2><button class="btn sec" data-fixadd style="padding:8px 12px;font-size:14px">+ 추가</button></div>
+  <div class="card"><div class="label">매달 나가는 고정비</div><div class="big num">${won(total)}</div>
+    <div class="kpis"><div class="kpi"><span class="label">이번 달 결제</span><b class="num inc">${man(paid)}</b></div><div class="kpi"><span class="label">남은 예정</span><b class="num">${man(total - paid)}</b></div><div class="kpi"><span class="label">할부</span><b class="num">${inst.length}건 ${man(inst.reduce((s, i) => s + i.amount, 0))}</b></div></div>
+    <div class="note" style="margin-top:12px">${Object.entries(byType).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${FIX_ICON[k]} ${k} ${man(v)}`).join(' · ')}</div></div>
+  <div class="section-title">결제일 순 <span class="label">눌러서 이름·금액·할부 회차 수정</span></div>
+  <div class="group">${act.map(fixedRow).join('') || '<div class="empty">찾은 고정비가 없어요</div>'}</div>
+  ${old.length ? `<div class="section-title">최근 결제가 없는 항목 <span class="label">끝났거나 해지된 것 같아요</span></div><div class="group" style="opacity:.7">${old.map(fixedRow).join('')}</div>` : ''}
+  <div class="note" style="text-align:center;margin-top:10px">최근 12개월 내역에서 3개월 이상 반복된 결제를 자동으로 찾았어요. 할부는 카드사가 회차별 금액을 보내준 경우에만 잡혀요. 안 잡힌 할부는 + 추가로 넣어 주세요.</div>`;
+}
+function editFixed(key) {
+  const F = DATA.settings.fixed;
+  const it = key ? fixedItems().concat(detectFixed().filter(x => F.overrides[x.key]?.hidden).map(x => Object.assign(x, F.overrides[x.key]))).find(i => i.key === key) : { key: 'M|' + Date.now(), name: '', amount: 0, day: 1, pay: '', type: '할부', auto: false, isNew: true };
+  if (!it) return;
+  const w = document.createElement('div'); w.className = 'modal';
+  w.innerHTML = `<form class="sheet" style="max-width:420px;max-height:90vh;overflow:auto"><b>${it.isNew ? '고정비 추가' : '고정비 수정'}</b>
+    <label class="field"><span class="label">이름</span><input name="name" value="${esc(it.name)}" required></label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><label class="field"><span class="label">월 금액(원)</span><input name="amount" inputmode="numeric" value="${Math.round(it.amount) || ''}"></label>
+    <label class="field"><span class="label">결제일</span><input name="day" inputmode="numeric" value="${it.day}"></label></div>
+    <label class="field"><span class="label">종류</span><select name="type">${FIX_TYPES.map(t => `<option ${t === it.type ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+    ${it.auto ? '' : `<label class="field"><span class="label">결제수단</span><input name="pay" value="${esc(it.pay || '')}"></label>`}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><label class="field"><span class="label">할부 총 회차</span><input name="total" inputmode="numeric" placeholder="예: 12" value="${it.total || ''}"></label>
+    <label class="field"><span class="label">첫 결제 월</span><input name="start" type="month" value="${esc(it.start || it.months?.[0] || '')}"></label></div>
+    <div class="row" style="margin-top:14px">${it.isNew ? '<span></span>' : `<button type="button" class="btn danger" data-del>${it.auto ? '목록에서 숨기기' : '삭제'}</button>`}<span style="display:flex;gap:8px"><button type="button" class="btn sec" data-x>취소</button><button class="btn">저장</button></span></div></form>`;
+  document.body.appendChild(w);
+  const close = () => w.remove();
+  w.querySelector('[data-x]').onclick = close;
+  w.querySelector('[data-del]')?.addEventListener('click', async () => {
+    if (it.auto) F.overrides[it.key] = { ...(F.overrides[it.key] || {}), hidden: true }; else F.manual = F.manual.filter(m => m.key !== it.key);
+    await persist(); close(); render(); toast('목록에서 뺐어요');
+  });
+  w.querySelector('form').onsubmit = async e => {
+    e.preventDefault(); const f = new FormData(e.target), num = n => Number(String(f.get(n) || '').replace(/[^0-9]/g, '')) || 0;
+    const v = { name: String(f.get('name')).trim() || it.name, amount: num('amount'), day: Math.min(31, Math.max(1, num('day') || 1)), type: f.get('type'), total: num('total') || undefined, start: f.get('start') || undefined };
+    if (it.auto) F.overrides[it.key] = { ...(F.overrides[it.key] || {}), ...v };
+    else { v.pay = String(f.get('pay') || '').trim(); const i = F.manual.findIndex(m => m.key === it.key); if (i >= 0) F.manual[i] = { ...F.manual[i], ...v }; else F.manual.push({ key: it.key, ...v }); }
+    await persist(); close(); render(); toast('저장했어요');
+  };
+}
+
 // ---------- Gmail 불러오기 (OAuth 리디렉트, 서버 없음) ----------
 // 토큰은 메모리에만 두고, 불러오기가 끝나면 바로 취소(revoke)합니다.
 let GTOKEN = null;
@@ -653,7 +787,9 @@ function readCards() {
 document.addEventListener('click', async e => {
   const el = e.target.closest('button,[data-gomonth]'); if (!el || !DEK) return;
   const d = el.dataset;
-  if (d.tab) { UI.tab = d.tab; return render(); }
+  if (d.tab) { if (d.tab === 'setting' && UI.tab !== 'setting') UI.prevTab = UI.tab; UI.tab = d.tab; return render(); }
+  if (d.fixed) return editFixed(d.fixed);
+  if ('fixadd' in d) return editFixed(null);
   if (d.go) { UI.tab = d.go; return render(); }
   if (d.day) { if (d.day === '0') UI.day = today; else shiftDay(+d.day); return render(); }
   if (d.month) { shiftMonth(+d.month); UI.year = UI.month.slice(0, 4); return render(); }
