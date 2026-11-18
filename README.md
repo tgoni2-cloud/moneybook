@@ -9,3 +9,8 @@
 
 ## 아이폰에 설치
 Safari로 주소 열기 → 공유 버튼 → "홈 화면에 추가".
+
+## 불러오기
+- 수동: Setting에서 뱅크샐러드 .zip(비밀번호) 또는 .xlsx 선택. 압축 비밀번호는 매번 입력하며 저장하지 않음.
+- Gmail: Setting → "Gmail에서 최신 파일 불러오기". Google OAuth(gmail.readonly) 리디렉트 방식, 토큰은 메모리에만 두고 끝나면 즉시 revoke.
+  Google Cloud에서 "웹 애플리케이션" OAuth 클라이언트를 만들고 승인된 리디렉션 URI에 `https://tgoni2-cloud.github.io/moneybook/` 를 등록한 뒤, 클라이언트 ID를 Setting에 입력.

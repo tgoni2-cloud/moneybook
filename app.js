@@ -63,6 +63,7 @@ const DEFAULT_SETTINGS = {
     { pay: '카드의 정석 WOWRI', label: '우리카드', target: 300000, note: '마이너스통장 우대금리' },
   ],
   rules: { salary: '한국쌔스소프트', reimb: 'SAS Softwa', wife: '김보민', wifeName: '아내' },
+  gmail: { clientId: '', query: 'banksalad has:attachment' },
 };
 let DEK = null, META = null;
 let DATA = null; // {txs, assets, settings, importedAt, fileName, assetHistory}
@@ -134,6 +135,7 @@ async function loadData() {
   if (!DATA) DATA = { txs: [], assets: null, settings: structuredClone(DEFAULT_SETTINGS), importedAt: null, fileName: null, assetHistory: [] };
   DATA.settings = Object.assign(structuredClone(DEFAULT_SETTINGS), DATA.settings || {});
   DATA.settings.rules = Object.assign(structuredClone(DEFAULT_SETTINGS.rules), DATA.settings.rules || {});
+  DATA.settings.gmail = Object.assign(structuredClone(DEFAULT_SETTINGS.gmail), DATA.settings.gmail || {});
   reclassify();
   // Default views to latest data if today has nothing yet
   if (DATA.txs.length) { const last = DATA.txs[0].d; if (last < UI.month + '-01') { UI.month = last.slice(0, 7); UI.year = last.slice(0, 4); } }
@@ -153,6 +155,7 @@ function unlocked() {
   $('#lock').classList.add('hidden'); $('#app').classList.remove('hidden'); $('#tabbar').classList.remove('hidden');
   if (!DATA.txs.length) UI.tab = 'setting';
   render();
+  if (GTOKEN) { const t = GTOKEN; GTOKEN = null; gmailImport(t); }
 }
 // Auto-lock after 60s in background
 let hiddenAt = 0;
@@ -274,8 +277,40 @@ function assetTotals(a) {
   return { assets, debts, net: assets - debts };
 }
 
-async function importFile(file) {
-  const buf = await file.arrayBuffer();
+// ---------- 비밀번호 걸린 zip (뱅크샐러드 내보내기) ----------
+const isZipName = n => /\.zip$/i.test(n || '');
+async function xlsxFromZip(buf) {
+  if (!window.zip) throw new Error('압축 해제 모듈을 불러오지 못했어요');
+  zip.configure({ useWebWorkers: false });
+  const reader = new zip.ZipReader(new zip.Uint8ArrayReader(new Uint8Array(buf)));
+  try {
+    const entries = await reader.getEntries();
+    const entry = entries.find(e => !e.directory && /\.xlsx?$/i.test(e.filename)) || entries.find(e => !e.directory);
+    if (!entry) throw new Error('압축파일 안에 엑셀 파일이 없어요');
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const password = entry.encrypted ? await askPassword(attempt ? '비밀번호가 달라요. 다시 입력해 주세요' : '뱅크샐러드에서 정한 압축파일 비밀번호를 입력하세요') : undefined;
+      try { return await entry.getData(new zip.Uint8ArrayWriter(), { password }); }
+      catch (err) { if (!entry.encrypted || !/password/i.test(err.message)) throw err; }
+    }
+    throw new Error('비밀번호가 3번 틀렸어요');
+  } finally { await reader.close(); }
+}
+// 비밀번호는 화면에서 입력만 받고 어디에도 저장하지 않음
+function askPassword(msg) {
+  return new Promise((resolve, reject) => {
+    const w = document.createElement('div'); w.className = 'modal';
+    w.innerHTML = `<form class="sheet"><b>압축파일 비밀번호</b><div class="note" style="margin:6px 0 12px">${esc(msg)}</div>
+      <input type="password" inputmode="numeric" autocomplete="off" maxlength="16" class="pw" aria-label="압축파일 비밀번호">
+      <div class="row" style="margin-top:14px"><button type="button" class="btn sec" data-x>취소</button><button class="btn">확인</button></div></form>`;
+    document.body.appendChild(w);
+    const inp = w.querySelector('input'); setTimeout(() => inp.focus(), 50);
+    w.querySelector('form').onsubmit = e => { e.preventDefault(); const v = inp.value; w.remove(); resolve(v); };
+    w.querySelector('[data-x]').onclick = () => { w.remove(); reject(new Error('취소했어요')); };
+  });
+}
+async function importFile(file) { return importBuffer(await file.arrayBuffer(), file.name); }
+async function importBuffer(buf, name) {
+  if (isZipName(name)) buf = await xlsxFromZip(buf);
   const { txs, assets } = parseBanksalad(buf);
   if (!txs.length) throw new Error('거래 내역이 비어 있어요');
   const start = DATA.settings.startDate || '0000-00-00';
@@ -288,7 +323,7 @@ async function importFile(file) {
     const tot = assetTotals(assets), dt = ymd(new Date());
     DATA.assetHistory = (DATA.assetHistory || []).filter(h => h.d !== dt).concat([{ d: dt, ...tot }]).slice(-60);
   }
-  DATA.importedAt = new Date().toISOString(); DATA.fileName = file.name;
+  DATA.importedAt = new Date().toISOString(); DATA.fileName = name;
   reclassify();
   await persist();
   const lastD = DATA.txs[0]?.d; if (lastD) { UI.month = lastD.slice(0, 7); UI.year = lastD.slice(0, 4); }
@@ -507,10 +542,16 @@ function vSetting() {
   const n = DATA.txs.length;
   return `<div class="topbar"><h2>Setting</h2></div>
   <div class="card"><b>뱅크샐러드 파일 업로드</b>
-    <label class="upload" style="display:block;margin-top:12px"><input type="file" id="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
-      <div style="font-size:28px">📄</div><div style="font-weight:600;margin-top:4px">파일 선택해서 업데이트</div><div class="note">뱅크샐러드 → 내 정보 → 데이터 내보내기로 받은 .xlsx</div></label>
+    <label class="upload" style="display:block;margin-top:12px"><input type="file" id="file" accept=".zip,.xlsx,.xls,application/zip,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+      <div style="font-size:28px">📄</div><div style="font-weight:600;margin-top:4px">파일 선택해서 업데이트</div><div class="note">뱅크샐러드에서 받은 .zip(비밀번호) 또는 .xlsx</div></label>
+    <button class="btn block" id="gmailImport" style="margin-top:10px">✉️ Gmail에서 최신 파일 불러오기</button>
     <div id="importMsg" class="note" style="margin-top:10px">${n ? `저장된 내역 ${n.toLocaleString()}건 · ${esc(DATA.fileName || '')}<br>${DATA.txs[n - 1].d} ~ ${DATA.txs[0].d}` : '아직 저장된 내역이 없어요'}</div>
     <div class="note" style="margin-top:8px">파일은 이 기기 안에서만 읽고 암호화해 저장해요. 어떤 서버로도 보내지 않아요. 새 파일을 올리면 그 파일 기간의 내역은 새 내용으로 바뀌고, 그 이전 내역은 남아요.</div></div>
+
+  <div class="card"><b>Gmail 연결</b><div class="note">버튼을 누를 때만 Google 로그인 창이 열리고, 메일은 읽기만 해요. 받은 권한은 불러오기가 끝나면 바로 취소해요.</div>
+    <label class="field"><span class="label">Google OAuth 클라이언트 ID</span><input id="gClient" placeholder="xxxx.apps.googleusercontent.com" value="${esc(S.gmail.clientId)}"></label>
+    <label class="field"><span class="label">메일 검색어</span><input id="gQuery" value="${esc(S.gmail.query)}"></label>
+    <button class="btn" id="saveGmail" style="margin-top:6px">저장</button></div>
 
   <div class="card"><b>카드 실적 목표</b><div id="cards">${S.cards.map((c, i) => `<div class="cardrow" data-i="${i}">
       <label class="field"><span class="label">이름</span><input data-f="label" value="${esc(c.label)}"></label>
@@ -539,6 +580,60 @@ function payOptions(cur) {
   const pays = [...new Set(DATA.txs.filter(t => t.type === '지출').map(t => t.pay))].filter(p => /카드|간편결제/.test(p)).sort();
   if (cur && !pays.includes(cur)) pays.unshift(cur);
   return '<option value="">선택하세요</option>' + pays.map(p => `<option ${p === cur ? 'selected' : ''}>${esc(p)}</option>`).join('');
+}
+
+// ---------- Gmail 불러오기 (OAuth 리디렉트, 서버 없음) ----------
+// 토큰은 메모리에만 두고, 불러오기가 끝나면 바로 취소(revoke)합니다.
+let GTOKEN = null;
+const appUrl = () => location.origin + location.pathname;
+function gmailStart() {
+  const id = DATA.settings.gmail.clientId;
+  if (!id) { toast('먼저 아래 Gmail 연결에 클라이언트 ID를 넣어 주세요'); return; }
+  const state = b64(rand(16)).replace(/[^A-Za-z0-9]/g, '');
+  try { sessionStorage.setItem('gstate', state); } catch {}
+  const q = new URLSearchParams({ client_id: id, redirect_uri: appUrl(), response_type: 'token', scope: 'https://www.googleapis.com/auth/gmail.readonly', state, include_granted_scopes: 'false', prompt: 'select_account' });
+  location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + q;
+}
+function gmailCatchRedirect() {
+  if (!location.hash || !/access_token=|error=/.test(location.hash)) return;
+  const h = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, '', appUrl());
+  let saved = null; try { saved = sessionStorage.getItem('gstate'); sessionStorage.removeItem('gstate'); } catch {}
+  if (h.get('error')) { setTimeout(() => toast('Google 로그인이 취소됐어요'), 300); return; }
+  if (!saved || h.get('state') !== saved) { setTimeout(() => toast('로그인 확인값이 맞지 않아 무시했어요'), 300); return; }
+  GTOKEN = h.get('access_token');
+}
+async function gapi(token, path) {
+  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/' + path, { headers: { Authorization: 'Bearer ' + token } });
+  if (!r.ok) throw new Error(r.status === 401 || r.status === 403 ? 'Gmail 권한이 없어요. 다시 시도해 주세요' : 'Gmail 응답 오류 (' + r.status + ')');
+  return r.json();
+}
+const b64url = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+function findAttachment(part) {
+  if (part.filename && /\.(zip|xlsx)$/i.test(part.filename) && part.body?.attachmentId) return part;
+  for (const p of part.parts || []) { const f = findAttachment(p); if (f) return f; }
+  return null;
+}
+async function gmailImport(token) {
+  UI.tab = 'setting'; render();
+  const msg = () => $('#importMsg');
+  try {
+    msg().textContent = 'Gmail에서 뱅크샐러드 메일을 찾는 중…';
+    const list = await gapi(token, 'messages?maxResults=10&q=' + encodeURIComponent(DATA.settings.gmail.query));
+    let found = null;
+    for (const m of list.messages || []) {
+      const full = await gapi(token, 'messages/' + m.id + '?format=full');
+      const att = findAttachment(full.payload);
+      if (att) { found = { id: m.id, att, date: new Date(Number(full.internalDate)), subject: (full.payload.headers || []).find(x => x.name.toLowerCase() === 'subject')?.value || '' }; break; }
+    }
+    if (!found) throw new Error('첨부파일이 있는 뱅크샐러드 메일을 찾지 못했어요. 메일 검색어를 확인해 주세요');
+    msg().textContent = `${found.date.toLocaleString('ko-KR')} 메일의 ${found.att.filename} 내려받는 중…`;
+    const a = await gapi(token, `messages/${found.id}/attachments/${found.att.body.attachmentId}`);
+    const r = await importBuffer(b64url(a.data).buffer, found.att.filename);
+    toast(`Gmail에서 불러오기 완료 · ${r.added.toLocaleString()}건 (${r.from} ~ ${r.to})`);
+    UI.tab = 'today'; render();
+  } catch (err) { if (msg()) msg().innerHTML = `<span class="exp">${esc(err.message)}</span>`; }
+  finally { fetch('https://oauth2.googleapis.com/revoke?token=' + encodeURIComponent(token), { method: 'POST' }).catch(() => {}); }
 }
 
 // ---------- events ----------
@@ -589,6 +684,8 @@ document.addEventListener('click', async e => {
       pinStage = 'change-new'; $('#app').classList.add('hidden'); $('#tabbar').classList.add('hidden'); $('#lock').classList.remove('hidden'); $('#bioBtn').classList.add('hidden');
       return lockMsg('새 비밀번호 6자리를 입력하세요');
     case 'lockNow': return lock();
+    case 'saveGmail': DATA.settings.gmail.clientId = $('#gClient').value.trim(); DATA.settings.gmail.query = $('#gQuery').value.trim() || DEFAULT_SETTINGS.gmail.query; await persist(); toast('Gmail 설정을 저장했어요'); return render();
+    case 'gmailImport': return gmailStart();
     case 'wipe':
       if (!confirm('이 기기에 저장된 가계부 데이터와 비밀번호를 모두 지울까요? 되돌릴 수 없어요.')) return;
       await idb.clear(); META = null; DEK = null; DATA = null; location.reload(); return;
@@ -609,9 +706,11 @@ $('#bioBtn').addEventListener('click', unlockBio);
 (async function boot() {
   try { const th = localStorage.getItem('theme'); if (th) document.documentElement.dataset.theme = th; } catch {}
   setupPad();
+  gmailCatchRedirect();
   if (!window.crypto?.subtle) { lockMsg('보안 연결(https)에서만 열 수 있어요'); $('#pad').classList.add('hidden'); return; }
   META = await idb.get('meta');
   if (!META) { pinStage = 'new'; $('#lockTitle').textContent = '처음 오셨네요'; lockMsg('이 기기에서 쓸 비밀번호 6자리를 정하세요'); }
   else if (META.bio) { $('#bioBtn').classList.remove('hidden'); }
+  if (GTOKEN && META) lockMsg('Gmail 연결됨 · 잠금을 풀면 바로 불러와요');
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
